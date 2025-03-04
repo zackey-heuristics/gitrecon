@@ -1,25 +1,16 @@
 import argparse
+import contextlib
 import json
 import os
+import sys
 
 import requests
 from rich import print
 from rich.console import Console
 
-from modules import gitlab_recon, github_recon
+from gitrecon.modules import gitlab_recon, github_recon
 
 console = Console()
-
-parser = argparse.ArgumentParser()
-
-parser.add_argument('username')
-parser.add_argument('-s', dest='sites', choices=['github', 'gitlab'],
-                    help="sites selection", required=True)
-parser.add_argument('-a', '--avatar', dest='avatar', action='store_true',
-                    help="download avatar pic")
-parser.add_argument('-o', '--output', dest='output', action='store_true',
-                    help="save output")
-args = parser.parse_args()
 
 
 def gitlab_user_recon(username):
@@ -220,66 +211,142 @@ def create_gitlab_json_output(user_data, status, keys):
     return json_output
 
 
-def save_output(json_output):
-    path = 'results/' + args.username
-    if not os.path.exists(path):
+# def save_output(json_output):
+#     path = 'results/' + args.username
+#     if not os.path.exists(path):
+#         try:
+#             os.mkdir(path)
+#         except:
+#             print()
+#             print('[bold red] [!] Error creating output folder[/bold red]')
+#             print()
+
+#     if args.sites == 'github':
+#         with open(path + '/' + args.username + '_github.json', 'w') as f:
+#             json.dump(json_output, f)
+#             print('[bold cyan] [+] Output saved: [/bold cyan]' + path + '/' + args.username + '_github.json')
+
+#     if args.sites == 'gitlab':
+#         with open(path + '/' + args.username + '_gitlab.json', 'w') as f:
+#             json.dump(json_output, f)
+#             print('[bold cyan] [+] Output saved: [/bold cyan]' + path + '/' + args.username + '_gitlab.json')
+
+#     console.rule()
+
+
+# def download_github_avatar(url):
+#     path = 'results/' + args.username
+#     if not os.path.exists(path):
+#         try:
+#             os.mkdir(path)
+#         except:
+#             print()
+#             print('[bold red] [!] Error creating output folder[/bold red]')
+#             print()
+#     r = requests.get(url)
+#     if args.sites == 'github':
+#         with open(path + '/' + args.username + '_github_avatar.jpg', "wb") as f:
+#             f.write(r.content)
+#         print('[bold cyan] [+] Avatar downloaded: [/bold cyan]' + path + '/' + args.username + '_github.jpg')
+
+#     if args.sites == 'gitlab':
+#         with open(path + '/' + args.username + '_gitlab_avatar.jpg', "wb") as f:
+#             f.write(r.content)
+#         print('[bold cyan] [+] Avatar downloaded: [/bold cyan]' + path + '/' + args.username + '_gitlab.jpg')
+
+#     console.rule()
+
+
+def output_destination(value):
+    """
+    If the user passes 'stdout' or 'stderr', return the corresponding stream.
+    Otherwise, treat the value as a filename and attempt to open it for writing.
+    """
+    if value.lower() == 'stdout':
+        return sys.stdout
+    elif value.lower() == 'stderr':
+        return sys.stderr
+    else:
         try:
-            os.mkdir(path)
-        except:
-            print()
-            print('[bold red] [!] Error creating output folder[/bold red]')
-            print()
-
-    if args.sites == 'github':
-        with open(path + '/' + args.username + '_github.json', 'w') as f:
-            json.dump(json_output, f)
-            print('[bold cyan] [+] Output saved: [/bold cyan]' + path + '/' + args.username + '_github.json')
-
-    if args.sites == 'gitlab':
-        with open(path + '/' + args.username + '_gitlab.json', 'w') as f:
-            json.dump(json_output, f)
-            print('[bold cyan] [+] Output saved: [/bold cyan]' + path + '/' + args.username + '_gitlab.json')
-
-    console.rule()
+            # Open the file for writing.
+            return open(value, 'w')
+        except Exception as e:
+            raise argparse.ArgumentTypeError(f"Cannot open file '{value}' for writing: {e}")
 
 
-def download_github_avatar(url):
-    path = 'results/' + args.username
-    if not os.path.exists(path):
-        try:
-            os.mkdir(path)
-        except:
-            print()
-            print('[bold red] [!] Error creating output folder[/bold red]')
-            print()
-    r = requests.get(url)
-    if args.sites == 'github':
-        with open(path + '/' + args.username + '_github_avatar.jpg', "wb") as f:
-            f.write(r.content)
-        print('[bold cyan] [+] Avatar downloaded: [/bold cyan]' + path + '/' + args.username + '_github.jpg')
+def main():
+    parser = argparse.ArgumentParser(
+        description="OSINT tool to get information from a Github and Gitlab profile and find user's email addresses leaked on commits."
+    )
+    parser.add_argument(
+        'username',
+        help="username to search for github or gitlab"
+    )
+    parser.add_argument(
+        '-s', 
+        dest='sites',
+        choices=['github', 'gitlab'],
+        help="sites selection", 
+        required=True
+    )
+    # parser.add_argument(
+    #     '-a', '--avatar',
+    #     dest='avatar',
+    #     action='store_true',
+    #     help="download avatar pic"
+    # )
+    parser.add_argument(
+        '-o', '--output',
+        type=output_destination,
+        default=sys.stdout,
+        help="output result destination: specify a filename, 'stdout' for standard output, or 'stderr' for standard error."
+    )
+    parser.add_argument(
+        '-q', '--quiet',
+        action='store_true',
+        help="suppress output"
+    )
+    parser.add_argument(
+        '-j', '--json',
+        action='store_true',
+        help="output in json format"
+    )
+    args = parser.parse_args()
+    username = args.username
+    sites = args.sites
+    # avatar_download_enabled = args.avatar
+    output = args.output
+    is_quiet = args.quiet
+    json_output_enabled = args.json
 
-    if args.sites == 'gitlab':
-        with open(path + '/' + args.username + '_gitlab_avatar.jpg', "wb") as f:
-            f.write(r.content)
-        print('[bold cyan] [+] Avatar downloaded: [/bold cyan]' + path + '/' + args.username + '_gitlab.jpg')
+    with contextlib.ExitStack() as stack:
+        if output not in (sys.stdout, sys.stderr):
+            stack.callback(output.close)
+            
+        if args.sites == 'github':
+            user_info, keys = github_user_recon(args.username)
+            if not is_quiet or not json_output_enabled:
+                print_github_results(user_info, keys)
+            else:
+                print(json.dumps(create_github_json_output(user_info, keys), indent=4), file=output)
+            # if args.output:
+            #     json_data = create_github_json_output(user_info, keys)
+            #     save_output(json_data)
+            # if args.avatar:
+            #     download_github_avatar(user_info['avatar_url'])
 
-    console.rule()
+        if args.sites == 'gitlab':
+            user_info, user_status, user_keys, user_gpg_keys = gitlab_user_recon(args.username)
+            if not is_quiet or not json_output_enabled:
+                print_gitlab_results(user_info, user_status, user_keys)
+            else:
+                print(json.dumps(create_gitlab_json_output(user_info, user_status, user_keys), indent=4), file=output)
+            # if args.output:
+            #     json_data = create_gitlab_json_output(user_info, user_status, user_keys)
+            #     save_output(json_data)
+            # if args.avatar:
+            #     download_github_avatar(user_info['avatar_url'])
 
 
-if args.sites == 'github':
-    user_info, keys = github_user_recon(args.username)
-    print_github_results(user_info, keys)
-    if args.output:
-        json_data = create_github_json_output(user_info, keys)
-        save_output(json_data)
-    if args.avatar:
-        download_github_avatar(user_info['avatar_url'])
-
-if args.sites == 'gitlab':
-    user_info, user_status, user_keys, user_gpg_keys = gitlab_user_recon(args.username)
-    print_gitlab_results(user_info, user_status, user_keys)
-    if args.output:
-        json_data = create_gitlab_json_output(user_info, user_status, user_keys)
-        save_output(json_data)
-    if args.avatar:
-        download_github_avatar(user_info['avatar_url'])
+if __name__ == '__main__':
+    main()
